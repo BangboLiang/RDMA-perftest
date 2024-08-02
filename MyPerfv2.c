@@ -1,6 +1,6 @@
 /*
 * BUILD COMMAND:
-* gcc -Wall -O2 -o MyPerf MyPerf.c -libverbs
+* gcc -Wall -O2 -o MyPerfv2 MyPerfv2.c -libverbs
 */
 /******************************************************************************
 *
