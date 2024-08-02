@@ -829,7 +829,7 @@ static int resources_create(struct resources *res)
     }
 
     /* each side will send only one WR, so Completion Queue with 1 entry is enough */
-    cq_size = 100;
+    cq_size = 1000;
     gettimeofday(&t1,NULL);
     res->cq = ibv_create_cq(res->ib_ctx, cq_size, NULL, NULL, 0);
     gettimeofday(&t2,NULL);
@@ -893,8 +893,8 @@ static int resources_create(struct resources *res)
     qp_init_attr.sq_sig_all = 1;
     qp_init_attr.send_cq = res->cq;
     qp_init_attr.recv_cq = res->cq;
-    qp_init_attr.cap.max_send_wr = 100;
-    qp_init_attr.cap.max_recv_wr = 100;
+    qp_init_attr.cap.max_send_wr = 1000;
+    qp_init_attr.cap.max_recv_wr = 1000;
     qp_init_attr.cap.max_send_sge = 1;
     qp_init_attr.cap.max_recv_sge = 1;
    // printf("----before ibv_create_qp\n");
