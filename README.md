@@ -4,11 +4,11 @@
 
 Now v3 is an avaliable version, the code is still being tested and programming. :)
 
-Usage:
- ./MyPerfv3 start a server and wait for connection
- ./MyPerfv3 <host> connect to server at <host>
+Usage:  
+ ./MyPerfv3 start a server and wait for connection  
+ ./MyPerfv3 <host> connect to server at <host>  
 
-Options:
+Options:  
  -p, --port <port> listen on/connect to port <port> (default 18515)  
 
  -d, --ib-dev <dev> use IB device <dev> (default first device found)  
