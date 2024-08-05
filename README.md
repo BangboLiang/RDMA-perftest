@@ -2,11 +2,14 @@
 
 ## Author Bangbo Liang lbb@hnu.edu.cn
 
-Now v3 is an avaliable version, the code is still being tested and programming. :)
+Now v4 is an avaliable version, the code is still being testing and programming. :)  
+
+## Attetion!  
+Now only send is avaliable, read and write are still programming.  
 
 Usage:  
- ./MyPerfv3 start a server and wait for connection  
- ./MyPerfv3 `<host>` connect to server at `<host>`
+ ./MyPerfv4 start a server and wait for connection  
+ ./MyPerfv4 `<host>` connect to server at `<host>`  
 
 Options:  
  -p, --port `<port>` listen on/connect to port `<port>` (default 18515)  
@@ -25,3 +28,5 @@ Options:
  
  
  -e, --iter_nums `<num>` number of iterations per test round(less than 1000)  
+
+ 
