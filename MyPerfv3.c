@@ -5,7 +5,7 @@
 /******************************************************************************
 *
 * RDMA Aware Networks Programming Perftest
-*
+* Pay attention that this version's time inverval option is not supported.
 *
 *****************************************************************************/
 #include <stdio.h>
