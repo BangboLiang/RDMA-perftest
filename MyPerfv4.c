@@ -539,7 +539,7 @@ static int send_bandwidth_test(struct resources *res, int opcode, int times, int
         speed_results[num_tested] = speed_results[num_tested] / 1000.0; // change bit/us to Gbits/s
         time_results[num_tested] = total_send_time_usec;
 
-        printf("Speed: %.2f Gbit/s, time: %.2fus\n", speed_results[num_tested], time_results[num_tested]);
+        printf("Speed: %.2f Gbit/s, time: %.2f us\n", speed_results[num_tested], time_results[num_tested]);
     }
     return 0;
 }
