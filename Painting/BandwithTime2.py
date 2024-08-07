@@ -14,6 +14,14 @@ def parse_data(filename,  interval):
             parts = line.split(',')
             speed = float(parts[0].split(':')[1].strip().split()[0])
             time =  float(parts[1].split(':')[1].strip().split()[0])
+            while time > interval :
+                tmptime = interval + last_time
+                last_time = tmptime
+                tmptime = tmptime / 1000.0
+                speeds.append(speed)
+                times.append(tmptime)
+                time = time - interval
+    
             time = time + last_time
             last_time = time
             time = time / 1000.0
@@ -29,7 +37,7 @@ def plot_data(speeds, times):
     plt.xlabel('Time (ms)')
     plt.ylabel('Throughput (Gbit/s)')
     plt.grid(True)
-    plt.savefig('testfile.png')
+    plt.savefig('testfile2.png')
     plt.close()
 
 # main function
