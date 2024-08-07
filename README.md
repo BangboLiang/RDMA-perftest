@@ -2,6 +2,8 @@
 
 ## Author Bangbo Liang lbb@hnu.edu.cn
 
+Version 5 is stilling testing, cause it's read perf test has some issues. :(   
+
 Now v4 is an avaliable version, the code is still being testing and programming. :)  
 
 ## Attetion!  
