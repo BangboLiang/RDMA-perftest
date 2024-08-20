@@ -1,12 +1,12 @@
 /*
 * BUILD COMMAND:
-* gcc -Wall -O2 -o MyPerfv5 MyPerfv5.c -libverbs
+* gcc -Wall -O2 -o MyPerfv6 MyPerfv6.c -libverbs -lpthread
 */
 /******************************************************************************
-*Version 5: Support RDMA write
+*Version 6: Support RDMA write
 * RDMA Aware Networks Programming Perftest
 *
-*
+
 *****************************************************************************/
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +24,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <time.h>
+#include <pthread.h>
 
 #define MAX_POLL_CQ_TIMEOUT 2000
 #define MSG "SEND operation "
@@ -31,6 +32,156 @@
 #define RDMAMSGW "RDMA write operation"
 #define MSG_SIZE 4096
 #define PRINT_LOG 1
+#define USECSTEP 10
+#define USECSTART 100
+#define DEBUG_DATA 0
+#define DEBUG 0
+
+
+typedef unsigned long long cycles_t;
+
+uint64_t last_iter;
+uint64_t this_iter;
+
+#define MEASUREMENTS 200
+
+void* handle_print_thread(void* duration);
+
+//For X86 only.
+static inline cycles_t get_cycles()
+{
+	unsigned low, high;
+	unsigned long long val;
+	asm volatile ("rdtsc" : "=a" (low), "=d" (high));
+	val = high;
+	val = (val << 32) | low;
+	return val;
+}
+
+static double sample_get_cpu_mhz(void)
+{
+	struct timeval tv1, tv2;
+	double sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+	int i;
+
+	/* Regression: y = a + b x */
+	long x[MEASUREMENTS];
+	cycles_t y[MEASUREMENTS];
+	double a; /* system call overhead in cycles */
+	double b; /* cycles per microsecond */
+	double r_2;
+
+	for (i = 0; i < MEASUREMENTS; ++i) {
+		cycles_t start = get_cycles();
+
+		if (gettimeofday(&tv1, NULL)) {
+			fprintf(stderr, "gettimeofday failed.\n");
+			return 0;
+		}
+
+		do {
+			if (gettimeofday(&tv2, NULL)) {
+				fprintf(stderr, "gettimeofday failed.\n");
+				return 0;
+			}
+		} while ((tv2.tv_sec - tv1.tv_sec) * 1000000 +
+				(tv2.tv_usec - tv1.tv_usec) < USECSTART + i * USECSTEP);
+
+		x[i] = (tv2.tv_sec - tv1.tv_sec) * 1000000 +
+			tv2.tv_usec - tv1.tv_usec;
+		y[i] = get_cycles() - start;
+		if (DEBUG_DATA)
+			fprintf(stderr, "x=%ld y=%Ld\n", x[i], (long long)y[i]);
+	}
+
+	for (i = 0; i < MEASUREMENTS; ++i) {
+		double tx = x[i];
+		double ty = y[i];
+		sx += tx;
+		sy += ty;
+		sxx += tx * tx;
+		syy += ty * ty;
+		sxy += tx * ty;
+	}
+
+	b = (MEASUREMENTS * sxy - sx * sy) / (MEASUREMENTS * sxx - sx * sx);
+	a = (sy - b * sx) / MEASUREMENTS;
+
+	if (DEBUG)
+		fprintf(stderr, "a = %g\n", a);
+	if (DEBUG)
+		fprintf(stderr, "b = %g\n", b);
+	if (DEBUG)
+		fprintf(stderr, "a / b = %g\n", a / b);
+	r_2 = (MEASUREMENTS * sxy - sx * sy) * (MEASUREMENTS * sxy - sx * sy) /
+		(MEASUREMENTS * sxx - sx * sx) /
+		(MEASUREMENTS * syy - sy * sy);
+
+	if (DEBUG)
+		fprintf(stderr, "r^2 = %g\n", r_2);
+	if (r_2 < 0.9) {
+		fprintf(stderr,"Correlation coefficient r^2: %g < 0.9\n", r_2);
+		return 0;
+	}
+
+	return b;
+}
+
+static double proc_get_cpu_mhz(int no_cpu_freq_warn)
+{
+	FILE* f;
+	char buf[256];
+	double mhz = 0.0;
+	int print_flag = 0;
+	double delta;
+	f = fopen("/proc/cpuinfo","r");
+
+	if (!f)
+		return 0.0;
+	while(fgets(buf, sizeof(buf), f)) {
+		double m;
+		int rc;
+
+		rc = sscanf(buf, "cpu MHz : %lf", &m);
+
+		if (rc != 1)
+			continue;
+
+		if (mhz == 0.0) {
+			mhz = m;
+			continue;
+		}
+		delta = mhz > m ? mhz - m : m - mhz;
+		if ((delta / mhz > 0.02) && (print_flag ==0)) {
+			print_flag = 1;
+			if (!no_cpu_freq_warn) {
+				fprintf(stderr, "Conflicting CPU frequency values"
+						" detected: %lf != %lf. CPU Frequency is not max.\n", mhz, m);
+			}
+			continue;
+		}
+	}
+	fclose(f);
+	return mhz;
+}
+
+double get_cpu_mhz(int no_cpu_freq_warn)
+{
+
+	double sample, proc, delta;
+	sample = sample_get_cpu_mhz();
+	proc = proc_get_cpu_mhz(no_cpu_freq_warn);
+
+	if (!proc || !sample)
+		return 0;
+
+	delta = proc > sample ? proc - sample : sample - proc;
+	if (delta / proc > 0.02) {
+		return sample;
+	}
+	return proc;
+}
+
 
 /*Change host data structure 2 network data structure due to byte order*/
 #if __BYTE_ORDER == __LITTLE_ENDIAN
@@ -554,6 +705,120 @@ static int send_bandwidth_test(struct resources *res, int opcode, int times, int
     return 0;
 }
 
+/******************************************************************************
+* Function: send_bandwidth_test_muiltithread
+*
+* Input:
+* res: pointer to resources structure
+* opcode: IBV_WR_SEND, IBV_WR_RDMA_READ or IBV_WR_RDMA_WRITE
+* times: try times of bandwidth test
+*
+* Output: none
+*
+* Returns: 0 on success, error code on failure
+*
+* Description: This function will create and post send work requests, and test performance
+******************************************************************************/
+static int send_bandwidth_test_muiltithread(struct resources *res, int opcode, int times, int iter, int interval_us){
+    
+    int poll_result;
+    int total_poll_result;
+
+    int rc;
+    char temp_char;
+
+    pthread_t print_thread;
+    int* interval = malloc(sizeof(int));
+    *interval = interval_us;
+
+    if ( pthread_create(&print_thread, NULL, handle_print_thread, (void*) interval) != 0)
+    {
+        fprintf(stderr, "Create thread failed!\n");
+        return -1;
+    }
+    
+
+    /*Ready to post send now*/
+    printf("-----------------speed test-------------------\n"); 
+    
+    //printf("Tring to sync data.\n");
+    //sock_sync_data(res->sock, 1, "Q", &temp_char);
+    struct ibv_send_wr sr[iter];
+    struct ibv_sge sge[iter];
+    struct ibv_send_wr *bad_wr[iter];
+    while (1)
+    {
+        total_poll_result = 0;
+        for(int i = 0;i < iter; i++){
+            memset(&sge[i], 0, sizeof(sge[i]));
+            sge[i].addr = (uintptr_t)res->buf;
+            sge[i].length = MSG_SIZE;
+            sge[i].lkey = res->mr->lkey;
+
+            memset(&sr[i], 0, sizeof(sr[i]));
+            sr[i].next = NULL;
+            sr[i].wr_id = 0;
+            sr[i].sg_list = &sge[i];
+            sr[i].num_sge = 1;
+            sr[i].opcode = opcode;
+            if(opcode != IBV_WR_SEND)
+            {   //read or write need remote addr and remote key.
+                sr[i].wr.rdma.remote_addr = res->remote_props.addr;
+                sr[i].wr.rdma.rkey = res->remote_props.rkey;
+            }
+            sr[i].send_flags = IBV_SEND_SIGNALED;
+            bad_wr[i] = NULL;
+        }
+
+        struct ibv_wc wc[iter];
+
+        if (opcode == IBV_WR_SEND)
+        {
+            sock_sync_data(res->sock, 1, "Q", &temp_char);
+        }
+        
+        for(int i = 0; i < iter; i++ ){
+            rc = ibv_post_send(res->qp, &sr[i], &bad_wr[i]);
+            if (!rc){
+                //fprintf(stdout, "ibv_post_send success!\n");
+                //message_sent++;
+            }
+            else
+                fprintf(stderr, "ibv_post_send error: %s\n", strerror(errno));
+        }
+
+        do{
+            //printf("Tring to poll cq.\n");
+            poll_result = ibv_poll_cq(res->cq, iter, wc);
+            //printf("Poll cq done.\n");
+            this_iter = this_iter + poll_result;
+            total_poll_result = total_poll_result +poll_result;
+
+        }while(total_poll_result != iter);
+
+        if(total_poll_result != iter){
+            fprintf(stderr, "Poll_result is %d, while iter is %d, error occured!\n", poll_result, iter);
+        }
+    }
+    
+    return 0;
+}
+
+
+/******************************************************************************
+* Function: recv_bandwidth_test
+*
+* Input:
+* res: pointer to resources structure
+* opcode: IBV_WR_SEND, IBV_WR_RDMA_READ or IBV_WR_RDMA_WRITE
+* times: try times of bandwidth test
+* iter: the iteration time.
+* Output: none
+*
+* Returns: 0 on success, error code on failure
+*
+* Description: This function will create and post recv work requests.
+******************************************************************************/
 static int recv_bandwidth_test(struct resources *res, int opcode, int times, int iter)
 {
     // struct ibv_recv_wr rr;
@@ -624,25 +889,6 @@ static int recv_bandwidth_test(struct resources *res, int opcode, int times, int
     }
     return rc;
 }
-
-/******************************************************************************
-* Function: read_bandwidth_test
-*
-* Input:
-* res: pointer to resources structure
-* opcode: IBV_WR_SEND, IBV_WR_RDMA_READ or IBV_WR_RDMA_WRITE
-* times: try times of bandwidth test
-*
-* Output: none
-*
-* Returns: 0 on success, error code on failure
-*
-* Description: This function will create and post send work requests, and test performance
-******************************************************************************/
-
-
-
-
 
 /******************************************************************************
 * Function: post_receive
@@ -831,7 +1077,7 @@ static int resources_create(struct resources *res)
     }
 
     /* each side will send only one WR, so Completion Queue with 1 entry is enough */
-    cq_size = 1000;
+    cq_size = 2000;
     gettimeofday(&t1,NULL);
     res->cq = ibv_create_cq(res->ib_ctx, cq_size, NULL, NULL, 0);
     gettimeofday(&t2,NULL);
@@ -895,8 +1141,8 @@ static int resources_create(struct resources *res)
     qp_init_attr.sq_sig_all = 1;
     qp_init_attr.send_cq = res->cq;
     qp_init_attr.recv_cq = res->cq;
-    qp_init_attr.cap.max_send_wr = 1000;
-    qp_init_attr.cap.max_recv_wr = 1000;
+    qp_init_attr.cap.max_send_wr = 2000;
+    qp_init_attr.cap.max_recv_wr = 2000;
     qp_init_attr.cap.max_send_sge = 1;
     qp_init_attr.cap.max_recv_sge = 1;
    // printf("----before ibv_create_qp\n");
@@ -1390,6 +1636,55 @@ static void print_config(void)
     fprintf(stdout, " Test iter num: %d\n", config.iter_nums);
     fprintf(stdout, " ------------------------------------------------\n\n");
 }
+
+/******************************************************************************
+* Function: handle_print_thread
+*
+* Input:
+* duration: How long time to print the result.
+*
+* Output: none
+*
+* Returns: none
+*
+* Description: thread use this fuction to print the test result.
+******************************************************************************/
+
+void* handle_print_thread(void* duration)
+{
+    int* iduration = (int*) duration;
+    cycles_t tposted;
+    cycles_t tcompleted;
+    uint64_t num_of_calculated_iters;
+    double cycles_to_units;
+    double sum_of_test_cycles;
+    double message_size;
+    double bw_avg;
+    double real_time;
+    //printf("Get CPU Mhz is %lf\n", get_cpu_mhz(1));
+    cycles_to_units = get_cpu_mhz(1) * 1000000;
+    printf("iduration is %d\ncycles to units is %lf\n", *iduration, cycles_to_units);
+    tposted = get_cycles();
+    while(1){
+        usleep(*iduration);
+        /*Calculate the results.*/
+        tcompleted = get_cycles();
+        /*Doing here.*/
+        //printf("tcompleted is %lld, tposted is %lld\n", tcompleted, tposted);
+        sum_of_test_cycles = tcompleted - tposted;
+        //printf("sum of test cycles is %lf\n", sum_of_test_cycles);
+        num_of_calculated_iters = this_iter - last_iter;
+        //printf("num of calculated iters is %ld\n", num_of_calculated_iters);
+        message_size = MSG_SIZE * 8.0;
+        real_time = sum_of_test_cycles / cycles_to_units * 1000000.0;
+        bw_avg = ((double) message_size * num_of_calculated_iters * cycles_to_units) / (sum_of_test_cycles * 1000000000);
+        printf("size %lf, iters %ld, rate %lf Gb/s, %lf us \n", message_size, num_of_calculated_iters, bw_avg, real_time);
+
+        last_iter = this_iter;
+        tposted = get_cycles();
+    }
+}
+
 /******************************************************************************
 * Function: usage
 *
@@ -1436,7 +1731,7 @@ int main(int argc, char *argv[])
 {
     struct resources res;
     int rc = 1;
-    char temp_char;
+    //char temp_char;
 
     /* parse the command line parameters */
     while(1)
@@ -1543,7 +1838,7 @@ int main(int argc, char *argv[])
     }
 
     if(config.server_name){
-        rc = send_bandwidth_test(&res, config.test_opcode, config.test_times, config.iter_nums, config.test_interval_us);
+        rc = send_bandwidth_test_muiltithread(&res, config.test_opcode, config.test_times, config.iter_nums, config.test_interval_us);
     }
     else{
         rc = recv_bandwidth_test(&res, config.test_opcode, config.test_times, config.iter_nums);
