@@ -2,16 +2,17 @@
 
 ## Author Bangbo Liang lbb@hnu.edu.cn
 
-Version 5 is stilling testing, cause it's read perf test has some issues. :(   
-
-Now v4 is an avaliable version, the code is still being testing and programming. :)  
+Now Version 8 is an avaliable version, the code is still being testing and programming. :)  
 
 ## Attetion!  
-Now only send is avaliable, read and write are still programming.  
+Version 4 only send is avaliable, 
+Version 8 read and write is avaliable.  
+
+Version 9 is programming, will support all operations.
 
 Usage:  
- ./MyPerfv4 start a server and wait for connection  
- ./MyPerfv4 `<host>` connect to server at `<host>`  
+ ./MyPerfv8 start a server and wait for connection  
+ ./MyPerfv8 `<host>` connect to server at `<host>`  
 
 Options:  
  -p, --port `<port>` listen on/connect to port `<port>` (default 18515)  
@@ -28,7 +29,6 @@ Options:
 
  -s, --test_times `<num>` number of test times  
  
- 
  -e, --iter_nums `<num>` number of iterations per test round(less than 1000)  
 
- 
+ -m, --Message_size `<Bytes>` Message's size in Bytes, default 65536.
